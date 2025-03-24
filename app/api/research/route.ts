@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
       query,
       breadth = 3,
       depth = 2,
-      modelId = "o3-mini",
+      modelId = "gpt-4o",
     } = await req.json();
 
     // Retrieve API keys from secure cookies

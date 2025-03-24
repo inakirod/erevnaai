@@ -88,6 +88,12 @@ export function Chat({
         }),
       });
 
+      // Check if the response is not ok (e.g., 4xx or 5xx status)
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Error conducting research");
+      }
+
       const reader = response.body?.getReader();
       if (!reader) throw new Error("No reader available");
 
@@ -163,7 +169,7 @@ export function Chat({
         {
           id: Date.now().toString(),
           role: "assistant",
-          content: "Sorry, there was an error conducting the research.",
+          content: `Sorry, there was an error conducting the research: ${error instanceof Error ? error.message : "Unknown error"}`,
         },
       ]);
     } finally {
@@ -213,6 +219,19 @@ export function Chat({
             modelId: config.modelId,
           }),
         });
+        
+        // Check if the response is not ok
+        if (!response.ok) {
+          const errorData = await response.json();
+          
+          // Check if it's a rate limit error
+          if (errorData.error?.includes("rate limit")) {
+            throw new Error("Rate limit reached. Please try again in a moment or use a different model.");
+          }
+          
+          throw new Error(errorData.error || "Error generating feedback questions");
+        }
+        
         const data = await response.json();
         const questions: string[] = data.questions || [];
         setMessages((prev) => {
@@ -240,7 +259,7 @@ export function Chat({
           {
             id: Date.now().toString(),
             role: "assistant",
-            content: "Sorry, there was an error generating feedback questions.",
+            content: `Sorry, there was an error generating feedback questions: ${error instanceof Error ? error.message : "Unknown error"}. You can try again with a different model.`,
           },
         ]);
       } finally {
@@ -252,6 +271,16 @@ export function Chat({
       setStage("researching");
       try {
         await sendResearchQuery(combined, config);
+      } catch (error) {
+        console.error("Research error:", error);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: Date.now().toString(),
+            role: "assistant",
+            content: `Sorry, there was an error conducting the research: ${error instanceof Error ? error.message : "Unknown error"}. You can try again with a different model.`,
+          },
+        ]);
       } finally {
         setIsLoading(false);
         // Reset the stage so further messages will be processed

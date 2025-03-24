@@ -5,7 +5,7 @@ import { generateFeedback } from "@/lib/deep-research/feedback";
 
 export async function POST(req: NextRequest) {
   try {
-    const { query, numQuestions, modelId = "o3-mini" } = await req.json();
+    const { query, numQuestions, modelId = "gpt-4o" } = await req.json();
 
     // Retrieve API key(s) from secure cookies
     const openaiKey = req.cookies.get("openai-key")?.value;
