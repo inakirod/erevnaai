@@ -233,23 +233,45 @@ export async function deepResearch({
   const firecrawl = getFirecrawl(firecrawlKey);
   const results: ResearchResult[] = [];
   let errors = 0;
+  let totalQueries = 0;
 
   try {
     // Generate SERP queries
     await logProgress(formatProgress.generating(breadth, query), onProgress);
 
-    const serpQueries = await generateSerpQueries({
-      query,
-      learnings,
-      numQueries: breadth,
-      onProgress,
-      model,
-    });
-
-    await logProgress(
-      formatProgress.created(serpQueries.length, serpQueries.join(', ')),
-      onProgress,
-    );
+    let serpQueries: string[] = [];
+    try {
+      serpQueries = await generateSerpQueries({
+        query,
+        learnings,
+        numQueries: breadth,
+        onProgress,
+        model,
+      });
+      
+      totalQueries = serpQueries.length;
+      
+      await logProgress(
+        formatProgress.created(serpQueries.length, serpQueries.join(', ')),
+        onProgress,
+      );
+    } catch (queryGenError) {
+      console.error("Error generating SERP queries:", queryGenError);
+      await logProgress("Error generating search queries. Using simplified approach...", onProgress);
+      
+      // Fallback to simple query generation if the AI fails
+      serpQueries = [
+        query,
+        `latest research on ${query}`,
+        `${query} analysis`
+      ].slice(0, breadth);
+      
+      totalQueries = serpQueries.length;
+      await logProgress(
+        formatProgress.created(serpQueries.length, serpQueries.join(', ')),
+        onProgress,
+      );
+    }
 
     // Process each SERP query
     for (const serpQuery of serpQueries) {
@@ -298,8 +320,20 @@ export async function deepResearch({
             // Log the error but continue with other queries
             console.error(`Error processing SERP result for "${serpQuery}":`, processingError);
             await logProgress(`Encountered an issue processing results for "${serpQuery}". Continuing with other queries...`, onProgress);
+            
+            // Add the URLs even if we couldn't process the content
+            results.push({
+              learnings: [],
+              visitedUrls: searchResults.data
+                .map(r => r.url)
+                .filter((url): url is string => url != null),
+            });
+            
             errors++;
           }
+        } else {
+          await logProgress(`No results found for "${serpQuery}". Continuing with other queries...`, onProgress);
+          errors++;
         }
       } catch (queryError) {
         // Log the error but continue with other queries
@@ -309,20 +343,43 @@ export async function deepResearch({
       }
     }
 
-    // If all queries failed, throw an error
-    if (errors === serpQueries.length) {
-      throw new Error("All research queries failed. Please try again with a different model or smaller query.");
+    // If all queries failed AND we have no results, throw an error
+    if (errors === totalQueries && results.length === 0) {
+      throw new Error("Unable to complete research. Please try again with a different query or model.");
     }
 
-    // Return whatever results we were able to gather
+    // Return whatever results we were able to gather, even if partial
+    const allLearnings = Array.from(new Set(results.flatMap(r => r.learnings)));
+    const allUrls = Array.from(new Set(results.flatMap(r => r.visitedUrls)));
+    
+    // If we have URLs but no learnings, generate some basic learnings from the query
+    if (allLearnings.length === 0 && allUrls.length > 0) {
+      await logProgress("Generating basic insights from search results...", onProgress);
+      try {
+        const basicLearnings = [
+          `Research was conducted on "${query}"`,
+          `Multiple sources were consulted (see URLs in the report)`,
+          `The search found relevant information, but detailed analysis was limited`
+        ];
+        
+        return {
+          learnings: basicLearnings,
+          visitedUrls: allUrls,
+        };
+      } catch (fallbackError) {
+        console.error("Error generating fallback learnings:", fallbackError);
+      }
+    }
+    
     return {
-      learnings: Array.from(new Set(results.flatMap(r => r.learnings))),
-      visitedUrls: Array.from(new Set(results.flatMap(r => r.visitedUrls))),
+      learnings: allLearnings,
+      visitedUrls: allUrls,
     };
   } catch (e) {
     // Only throw if it's a critical error that prevented any research
     if (results.length === 0) {
-      throw handleResearchError(e, query);
+      console.error("Critical research error:", e);
+      throw new Error("Unable to complete research. Please try again with a different query or model.");
     }
     
     // Otherwise return partial results

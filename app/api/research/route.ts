@@ -218,17 +218,63 @@ export async function POST(req: NextRequest) {
             console.error("Error type:", error instanceof Error ? error.constructor.name : typeof error);
           }
           
-          // Sanitize the error message before sending to client
-          const sanitizedMessage = sanitizeErrorMessage(error);
-          
-          await writer.write(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                type: "error",
-                message: sanitizedMessage,
-              })}\n\n`
-            )
-          );
+          // Try to recover with a fallback approach
+          try {
+            await writer.write(
+              encoder.encode(
+                `data: ${JSON.stringify({
+                  type: "progress",
+                  step: {
+                    type: "research",
+                    content: "Encountered an issue. Attempting to continue with limited results...",
+                  },
+                })}\n\n`
+              )
+            );
+            
+            // Generate a simple report even if research failed
+            const fallbackReport = `# Research Report on ${query}
+
+## Summary
+The research system encountered technical limitations while processing your query "${query}". 
+
+## Key Points
+- The query may be too complex or broad for the current system capabilities
+- Consider breaking your research into smaller, more focused queries
+- Try using a different model or reducing the breadth/depth parameters
+
+## Recommendations
+1. Try a more specific query
+2. Use the gpt-3.5-turbo model which has higher rate limits
+3. Reduce the breadth parameter to 2 and depth to 1
+
+We apologize for the inconvenience and are continuously working to improve our research capabilities.`;
+
+            await writer.write(
+              encoder.encode(
+                `data: ${JSON.stringify({
+                  type: "result",
+                  feedbackQuestions: [],
+                  learnings: [],
+                  visitedUrls: [],
+                  report: fallbackReport,
+                  note: "Research could not be completed due to technical limitations. This is a fallback report."
+                })}\n\n`
+              )
+            );
+          } catch (fallbackError) {
+            // If even the fallback fails, send a sanitized error message
+            const sanitizedMessage = sanitizeErrorMessage(error);
+            
+            await writer.write(
+              encoder.encode(
+                `data: ${JSON.stringify({
+                  type: "error",
+                  message: sanitizedMessage,
+                })}\n\n`
+              )
+            );
+          }
         } finally {
           await writer.close();
         }

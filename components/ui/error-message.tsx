@@ -16,6 +16,14 @@ export function ErrorMessage({ message, suggestion }: ErrorMessageProps) {
       {suggestion && (
         <p className="text-sm text-red-600 ml-7">{suggestion}</p>
       )}
+      <div className="text-sm text-red-600 ml-7 mt-2">
+        <p>Suggestions:</p>
+        <ul className="list-disc ml-5 mt-1">
+          <li>Try a more specific query</li>
+          <li>Use the gpt-3.5-turbo model which has higher rate limits</li>
+          <li>Reduce the breadth and depth parameters</li>
+        </ul>
+      </div>
     </div>
   );
 } 
