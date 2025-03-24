@@ -15,7 +15,7 @@ export async function generateFeedback({
   modelId?: AIModel;
   apiKey?: string;
 }) {
-  const model = createModel(modelId, apiKey);
+  const model = createModel(modelId, apiKey || process.env.OPENAI_API_KEY);
   const modelInfo = AI_MODEL_DISPLAY[modelId];
 
   // Use a fallback model if rate limited
@@ -42,11 +42,14 @@ export async function generateFeedback({
         } catch (error) {
           console.error("Error with structured output, falling back to text generation:", error);
           // If structured output fails, fall back to text generation
-          const textResult = await generateText({
+          const textResponse = await generateText({
             model,
             system: systemPrompt(),
             prompt: `Given the following query from the user, ask some follow up questions to clarify the research direction. Return a maximum of ${numQuestions} questions, but feel free to return less if the original query is clear. Format your response as a numbered list, with one question per line, starting with "1. ". <query>${query}</query>`,
           });
+          
+          // Extract the text content from the response
+          const textResult = textResponse.toString();
           
           // Parse the text response into an array of questions
           const lines = textResult.split('\n').filter(line => line.trim());
@@ -65,7 +68,7 @@ export async function generateFeedback({
         }
       } else {
         // For models that don't support structured outputs, use generateText instead
-        const textResult = await withRateLimitRetry(() => 
+        const textResponse = await withRateLimitRetry(() => 
           generateText({
             model,
             system: systemPrompt(),
@@ -73,9 +76,8 @@ export async function generateFeedback({
           })
         );
         
-        if (typeof textResult !== 'string') {
-          throw new Error('Expected string response from text generation');
-        }
+        // Extract the text content from the response
+        const textResult = textResponse.toString();
         
         // Parse the text response into an array of questions
         const lines = textResult.split('\n').filter(line => line.trim());
@@ -96,19 +98,18 @@ export async function generateFeedback({
       console.error("Error with primary model, falling back to gpt-3.5-turbo:", error);
       
       // Fall back to gpt-3.5-turbo if there's an issue with the primary model
-      const fallbackModel = createModel('gpt-3.5-turbo', apiKey);
+      const fallbackModel = createModel('gpt-3.5-turbo', apiKey || process.env.OPENAI_API_KEY);
       
       try {
         // gpt-3.5-turbo doesn't support structured outputs, so use generateText
-        const textResult = await generateText({
+        const textResponse = await generateText({
           model: fallbackModel,
           system: systemPrompt(),
           prompt: `Given the following query from the user, ask some follow up questions to clarify the research direction. Return a maximum of ${numQuestions} questions, but feel free to return less if the original query is clear. Format your response as a numbered list, with one question per line, starting with "1. ". <query>${query}</query>`,
         });
         
-        if (typeof textResult !== 'string') {
-          throw new Error('Expected string response from text generation');
-        }
+        // Extract the text content from the response
+        const textResult = textResponse.toString();
         
         // Parse the text response into an array of questions
         const lines = textResult.split('\n').filter(line => line.trim());
