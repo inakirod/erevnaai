@@ -7,6 +7,23 @@ import {
 } from "@/lib/deep-research";
 import { createModel, type AIModel } from "@/lib/deep-research/ai/providers";
 
+// Helper function to sanitize error messages
+function sanitizeErrorMessage(error: any): string {
+  // Check if it's a rate limit error
+  const errorMessage = error?.toString() || String(error);
+  
+  if (
+    errorMessage.includes("rate_limit_exceeded") || 
+    errorMessage.includes("tokens per min") ||
+    errorMessage.includes("TPM")
+  ) {
+    return "Rate limit exceeded. Please try again in a moment or use a different model with higher rate limits.";
+  }
+  
+  // Generic error message that doesn't expose sensitive information
+  return "An error occurred during research. Please try again or use a different model.";
+}
+
 export async function POST(req: NextRequest) {
   try {
     const {
@@ -68,58 +85,147 @@ export async function POST(req: NextRequest) {
             )
           );
 
-          const { learnings, visitedUrls } = await deepResearch({
-            query,
-            breadth,
-            depth,
-            model,
-            firecrawlKey,
-            onProgress: async (update: string) => {
-              console.log("\n📊 [RESEARCH ROUTE] Progress Update:", update);
+          try {
+            const { learnings, visitedUrls } = await deepResearch({
+              query,
+              breadth,
+              depth,
+              model,
+              firecrawlKey,
+              onProgress: async (update: string) => {
+                console.log("\n📊 [RESEARCH ROUTE] Progress Update:", update);
+                await writer.write(
+                  encoder.encode(
+                    `data: ${JSON.stringify({
+                      type: "progress",
+                      step: {
+                        type: "research",
+                        content: update,
+                      },
+                    })}\n\n`
+                  )
+                );
+              },
+            });
+
+            console.log("\n✅ [RESEARCH ROUTE] === Research Completed ===");
+            console.log("Learnings Count:", learnings.length);
+            console.log("Visited URLs Count:", visitedUrls.length);
+
+            // If we have at least some learnings, generate a report
+            if (learnings.length > 0) {
+              const report = await writeFinalReport({
+                prompt: query,
+                learnings,
+                visitedUrls,
+                model,
+              });
+
+              await writer.write(
+                encoder.encode(
+                  `data: ${JSON.stringify({
+                    type: "result",
+                    feedbackQuestions,
+                    learnings,
+                    visitedUrls,
+                    report,
+                  })}\n\n`
+                )
+              );
+            } else {
+              // No learnings were gathered
+              throw new Error("Unable to gather research results. Please try again with a different query or model.");
+            }
+          } catch (researchError) {
+            // Check if it's a rate limit error
+            const errorStr = String(researchError);
+            if (
+              errorStr.includes('rate_limit_exceeded') || 
+              errorStr.includes('tokens per min') || 
+              errorStr.includes('TPM') ||
+              errorStr.includes('AI_RetryError')
+            ) {
+              // Try with a smaller model as fallback
               await writer.write(
                 encoder.encode(
                   `data: ${JSON.stringify({
                     type: "progress",
                     step: {
                       type: "research",
-                      content: update,
+                      content: "Rate limit reached with primary model. Trying with a smaller model...",
                     },
                   })}\n\n`
                 )
               );
-            },
-          });
+              
+              const fallbackModel = createModel('gpt-3.5-turbo', openaiKey);
+              const { learnings, visitedUrls } = await deepResearch({
+                query,
+                breadth: Math.max(breadth - 1, 1), // Reduce breadth for fallback
+                depth: Math.max(depth - 1, 1),     // Reduce depth for fallback
+                model: fallbackModel,
+                firecrawlKey,
+                onProgress: async (update: string) => {
+                  console.log("\n📊 [RESEARCH ROUTE] Fallback Progress Update:", update);
+                  await writer.write(
+                    encoder.encode(
+                      `data: ${JSON.stringify({
+                        type: "progress",
+                        step: {
+                          type: "research",
+                          content: update,
+                        },
+                      })}\n\n`
+                    )
+                  );
+                },
+              });
+              
+              if (learnings.length > 0) {
+                const report = await writeFinalReport({
+                  prompt: query,
+                  learnings,
+                  visitedUrls,
+                  model: fallbackModel,
+                });
 
-          console.log("\n✅ [RESEARCH ROUTE] === Research Completed ===");
-          console.log("Learnings Count:", learnings.length);
-          console.log("Visited URLs Count:", visitedUrls.length);
-
-          const report = await writeFinalReport({
-            prompt: query,
-            learnings,
-            visitedUrls,
-            model,
-          });
-
-          await writer.write(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                type: "result",
-                feedbackQuestions,
-                learnings,
-                visitedUrls,
-                report,
-              })}\n\n`
-            )
-          );
+                await writer.write(
+                  encoder.encode(
+                    `data: ${JSON.stringify({
+                      type: "result",
+                      feedbackQuestions,
+                      learnings,
+                      visitedUrls,
+                      report,
+                      note: "Research was completed with a fallback model due to rate limits."
+                    })}\n\n`
+                  )
+                );
+              } else {
+                throw new Error("Unable to complete research even with fallback model.");
+              }
+            } else {
+              throw researchError; // Re-throw if it's not a rate limit error
+            }
+          }
         } catch (error) {
           console.error("\n❌ [RESEARCH ROUTE] === Research Process Error ===");
-          console.error("Error:", error);
+          
+          // Only log the full error details in development
+          if (process.env.NODE_ENV === 'development') {
+            console.error("Detailed error:", error);
+          } else {
+            console.error("Error type:", error instanceof Error ? error.constructor.name : typeof error);
+          }
+          
+          // Sanitize the error message before sending to client
+          const sanitizedMessage = sanitizeErrorMessage(error);
+          
           await writer.write(
             encoder.encode(
               `data: ${JSON.stringify({
                 type: "error",
-                message: "Research failed",
+                message: sanitizedMessage,
               })}\n\n`
             )
           );
@@ -140,11 +246,17 @@ export async function POST(req: NextRequest) {
     } catch (error) {
       console.error("\n💥 [RESEARCH ROUTE] === Route Error ===");
       console.error("Error:", error);
-      return Response.json({ error: "Research failed" }, { status: 500 });
+      
+      // Sanitize the error message
+      const sanitizedMessage = sanitizeErrorMessage(error);
+      
+      return Response.json({ error: sanitizedMessage }, { status: 500 });
     }
   } catch (error) {
     console.error("\n💥 [RESEARCH ROUTE] === Parse Error ===");
     console.error("Error:", error);
-    return Response.json({ error: "Research failed" }, { status: 500 });
+    return Response.json({ 
+      error: "Could not process your research request. Please check your input and try again." 
+    }, { status: 400 });
   }
 }

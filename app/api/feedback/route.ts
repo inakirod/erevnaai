@@ -3,6 +3,23 @@ import { NextRequest, NextResponse } from "next/server";
 import { AIModel } from "@/lib/deep-research/ai/providers";
 import { generateFeedback } from "@/lib/deep-research/feedback";
 
+// Helper function to sanitize error messages
+function sanitizeErrorMessage(error: any): string {
+  // Check if it's a rate limit error
+  const errorMessage = error?.toString() || String(error);
+  
+  if (
+    errorMessage.includes("rate_limit_exceeded") || 
+    errorMessage.includes("tokens per min") ||
+    errorMessage.includes("TPM")
+  ) {
+    return "Rate limit exceeded. Please try again in a moment or use a different model with higher rate limits.";
+  }
+  
+  // Generic error message that doesn't expose sensitive information
+  return "An error occurred. Please try again or use a different model.";
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { query, numQuestions, modelId = "gpt-4o" } = await req.json();
@@ -57,6 +74,9 @@ export async function POST(req: NextRequest) {
       console.error("\n❌ [FEEDBACK ROUTE] === Generation Error ===");
       console.error("Error:", error);
       
+      // Sanitize the error message
+      const sanitizedMessage = sanitizeErrorMessage(error);
+      
       // Return default questions on error
       return NextResponse.json({ 
         questions: [
@@ -64,7 +84,7 @@ export async function POST(req: NextRequest) {
           `What is your goal for researching ${query}?`,
           `Do you have any specific requirements or constraints for this research?`
         ].slice(0, numQuestions || 3),
-        error: error instanceof Error ? error.message : String(error)
+        error: sanitizedMessage
       });
     }
   } catch (error) {
@@ -73,8 +93,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(
       {
-        error: "Feedback generation failed",
-        details: error instanceof Error ? error.message : String(error),
+        error: "Could not generate feedback questions",
         questions: [
           "What topic would you like to research?",
           "What specific aspects are you interested in?",

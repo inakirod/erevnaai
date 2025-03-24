@@ -11,6 +11,8 @@ import DownloadTxtButton from "./download-txt";
 import { MultimodalInput } from "./input";
 import { PreviewMessage, ProgressStep } from "./message";
 import { ResearchProgress } from "./research-progress";
+import { ErrorMessage } from '../ui/error-message';
+import { PartialResultsMessage } from '../ui/partial-results-message';
 
 export function Chat({
   id,
@@ -133,12 +135,18 @@ export function Chat({
               } else if (event.type === "result") {
                 // Save the final report so we can download it later
                 setFinalReport(event.report);
+                
+                // Check if there's a note about using fallback model
+                const content = event.note 
+                  ? `<PartialResultsMessage message="${event.note}" />\n\n${event.report}`
+                  : event.report;
+                
                 setMessages((prev) => [
                   ...prev,
                   {
                     id: Date.now().toString(),
                     role: "assistant",
-                    content: event.report,
+                    content: content,
                   },
                 ]);
               } else if (event.type === "report_part") {
@@ -166,12 +174,25 @@ export function Chat({
       }
     } catch (error) {
       console.error("Research error:", error);
+      
+      // Check if the error is a rate limit error
+      let errorMessage = "Sorry, there was an error conducting the research.";
+      let suggestion = "Please try again or use a different model.";
+      
+      if (error instanceof Error) {
+        const errorText = error.message.toLowerCase();
+        if (errorText.includes("rate limit") || errorText.includes("tpm")) {
+          errorMessage = "Rate limit reached.";
+          suggestion = "Please try again in a moment or use a different model with higher rate limits.";
+        }
+      }
+      
       setMessages((prev) => [
         ...prev,
         {
           id: Date.now().toString(),
           role: "assistant",
-          content: `Sorry, there was an error conducting the research: ${error instanceof Error ? error.message : "Unknown error"}`,
+          content: `<ErrorMessage message="${errorMessage}" suggestion="${suggestion}" />`,
         },
       ]);
     } finally {

@@ -197,6 +197,29 @@ export async function writeFinalReport({
   return `# Research Report\n\n${res.object.reportMarkdown}${urlsSection}`;
 }
 
+function handleResearchError(error: any, query: string): Error {
+  console.error(`Error running query: ${query}: `, error);
+  
+  // Log the full error for debugging but don't expose it to the user
+  if (process.env.NODE_ENV === 'development') {
+    console.error('Detailed error:', error);
+  }
+  
+  // Check if it's a rate limit error
+  const errorStr = String(error);
+  if (
+    errorStr.includes('rate_limit_exceeded') || 
+    errorStr.includes('tokens per min') || 
+    errorStr.includes('TPM') ||
+    errorStr.includes('AI_RetryError')
+  ) {
+    return new Error('Rate limit exceeded. Please try again with a smaller query or use a different model with higher rate limits.');
+  }
+  
+  // Generic error that doesn't expose sensitive information
+  return new Error('An error occurred during research. Please try again or use a different model.');
+}
+
 export async function deepResearch({
   query,
   breadth = 3,
@@ -209,78 +232,104 @@ export async function deepResearch({
 }: DeepResearchOptions): Promise<ResearchResult> {
   const firecrawl = getFirecrawl(firecrawlKey);
   const results: ResearchResult[] = [];
+  let errors = 0;
 
-  // Generate SERP queries
-  await logProgress(formatProgress.generating(breadth, query), onProgress);
+  try {
+    // Generate SERP queries
+    await logProgress(formatProgress.generating(breadth, query), onProgress);
 
-  const serpQueries = await generateSerpQueries({
-    query,
-    learnings,
-    numQueries: breadth,
-    onProgress,
-    model,
-  });
+    const serpQueries = await generateSerpQueries({
+      query,
+      learnings,
+      numQueries: breadth,
+      onProgress,
+      model,
+    });
 
-  await logProgress(
-    formatProgress.created(serpQueries.length, serpQueries.join(', ')),
-    onProgress,
-  );
+    await logProgress(
+      formatProgress.created(serpQueries.length, serpQueries.join(', ')),
+      onProgress,
+    );
 
-  // Process each SERP query
-  for (const serpQuery of serpQueries) {
-    try {
-      await logProgress(formatProgress.researching(serpQuery), onProgress);
+    // Process each SERP query
+    for (const serpQuery of serpQueries) {
+      try {
+        await logProgress(formatProgress.researching(serpQuery), onProgress);
 
-      const searchResults = await firecrawl.search(serpQuery, {
-        timeout: 15000,
-        limit: 5,
-        scrapeOptions: { formats: ['markdown'] },
-      });
-
-      await logProgress(
-        formatProgress.found(searchResults.data.length, serpQuery),
-        onProgress,
-      );
-
-      if (searchResults.data.length > 0) {
-        await logProgress(
-          formatProgress.ran(serpQuery, searchResults.data.length),
-          onProgress,
-        );
-
-        const newLearnings = await processSerpResult({
-          query: serpQuery,
-          result: searchResults,
-          numLearnings: Math.ceil(breadth / 2),
-          numFollowUpQuestions: Math.ceil(breadth / 2),
-          onProgress,
-          model,
+        const searchResults = await firecrawl.search(serpQuery, {
+          timeout: 15000,
+          limit: 5,
+          scrapeOptions: { formats: ['markdown'] },
         });
 
         await logProgress(
-          formatProgress.generated(newLearnings.learnings.length, serpQuery),
+          formatProgress.found(searchResults.data.length, serpQuery),
           onProgress,
         );
 
-        results.push({
-          learnings: newLearnings.learnings,
-          visitedUrls: searchResults.data
-            .map(r => r.url)
-            .filter((url): url is string => url != null),
-        });
+        if (searchResults.data.length > 0) {
+          await logProgress(
+            formatProgress.ran(serpQuery, searchResults.data.length),
+            onProgress,
+          );
+
+          try {
+            const newLearnings = await processSerpResult({
+              query: serpQuery,
+              result: searchResults,
+              numLearnings: Math.ceil(breadth / 2),
+              numFollowUpQuestions: Math.ceil(breadth / 2),
+              onProgress,
+              model,
+            });
+
+            await logProgress(
+              formatProgress.generated(newLearnings.learnings.length, serpQuery),
+              onProgress,
+            );
+
+            results.push({
+              learnings: newLearnings.learnings,
+              visitedUrls: searchResults.data
+                .map(r => r.url)
+                .filter((url): url is string => url != null),
+            });
+          } catch (processingError) {
+            // Log the error but continue with other queries
+            console.error(`Error processing SERP result for "${serpQuery}":`, processingError);
+            await logProgress(`Encountered an issue processing results for "${serpQuery}". Continuing with other queries...`, onProgress);
+            errors++;
+          }
+        }
+      } catch (queryError) {
+        // Log the error but continue with other queries
+        console.error(`Error with SERP query "${serpQuery}":`, queryError);
+        await logProgress(`Encountered an issue with query "${serpQuery}". Continuing with other queries...`, onProgress);
+        errors++;
       }
-    } catch (e) {
-      console.error(`Error running query: ${serpQuery}: `, e);
-      await logProgress(`Error running "${serpQuery}": ${e}`, onProgress);
-      results.push({
-        learnings: [],
-        visitedUrls: [],
-      });
     }
-  }
 
-  return {
-    learnings: Array.from(new Set(results.flatMap(r => r.learnings))),
-    visitedUrls: Array.from(new Set(results.flatMap(r => r.visitedUrls))),
-  };
+    // If all queries failed, throw an error
+    if (errors === serpQueries.length) {
+      throw new Error("All research queries failed. Please try again with a different model or smaller query.");
+    }
+
+    // Return whatever results we were able to gather
+    return {
+      learnings: Array.from(new Set(results.flatMap(r => r.learnings))),
+      visitedUrls: Array.from(new Set(results.flatMap(r => r.visitedUrls))),
+    };
+  } catch (e) {
+    // Only throw if it's a critical error that prevented any research
+    if (results.length === 0) {
+      throw handleResearchError(e, query);
+    }
+    
+    // Otherwise return partial results
+    console.warn("Research completed with some errors:", e);
+    return {
+      learnings: Array.from(new Set(results.flatMap(r => r.learnings))),
+      visitedUrls: Array.from(new Set(results.flatMap(r => r.visitedUrls))),
+    };
+  }
 }
