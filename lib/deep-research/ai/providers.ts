@@ -37,10 +37,15 @@ export const availableModels = Object.values(AI_MODEL_DISPLAY);
 
 // Create model instances with configurations
 export function createModel(modelId: AIModel, apiKey?: string) {
+  // Use the API key from the environment if not provided
+  const openaiKey = apiKey || process.env.OPENAI_API_KEY || process.env.OPENAI_KEY;
+  
+  if (!openaiKey) {
+    console.warn('No OpenAI API key provided. Using default configuration.');
+  }
+  
   const client = createOpenAI({
-    apiKey: apiKey || process.env.OPENAI_KEY!,
-    maxRetries: 3,
-    timeout: 60000,
+    apiKey: openaiKey,
   });
 
   // Only use structuredOutputs for models that support it
