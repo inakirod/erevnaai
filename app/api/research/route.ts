@@ -131,8 +131,10 @@ export async function POST(req: NextRequest) {
       return new Response(stream.readable, {
         headers: {
           "Content-Type": "text/event-stream",
-          "Cache-Control": "no-cache",
-          Connection: "keep-alive",
+          "Cache-Control": "no-cache, no-transform",
+          "Connection": "keep-alive",
+          "X-Accel-Buffering": "no", // Prevents buffering for Nginx
+          "Accept-Ranges": "none", // Explicitly disable range requests
         },
       });
     } catch (error) {

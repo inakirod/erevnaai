@@ -79,6 +79,8 @@ export function Chat({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "Accept": "text/event-stream",
+          "Cache-Control": "no-cache",
         },
         body: JSON.stringify({
           query,
