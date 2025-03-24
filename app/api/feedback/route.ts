@@ -31,6 +31,16 @@ export async function POST(req: NextRequest) {
     });
 
     try {
+      if (!query || typeof query !== 'string' || !query.trim()) {
+        return NextResponse.json({ 
+          questions: [
+            "What topic would you like to research?",
+            "What specific aspects are you interested in?",
+            "What is your goal for this research?"
+          ].slice(0, numQuestions || 3)
+        });
+      }
+
       const questions = await generateFeedback({
         query,
         numQuestions,
@@ -46,7 +56,16 @@ export async function POST(req: NextRequest) {
     } catch (error) {
       console.error("\n❌ [FEEDBACK ROUTE] === Generation Error ===");
       console.error("Error:", error);
-      throw error;
+      
+      // Return default questions on error
+      return NextResponse.json({ 
+        questions: [
+          `What specific aspects of ${query} are you most interested in?`,
+          `What is your goal for researching ${query}?`,
+          `Do you have any specific requirements or constraints for this research?`
+        ].slice(0, numQuestions || 3),
+        error: error instanceof Error ? error.message : String(error)
+      });
     }
   } catch (error) {
     console.error("\n💥 [FEEDBACK ROUTE] === Route Error ===");
@@ -56,6 +75,11 @@ export async function POST(req: NextRequest) {
       {
         error: "Feedback generation failed",
         details: error instanceof Error ? error.message : String(error),
+        questions: [
+          "What topic would you like to research?",
+          "What specific aspects are you interested in?",
+          "What is your goal for this research?"
+        ]
       },
       { status: 500 }
     );

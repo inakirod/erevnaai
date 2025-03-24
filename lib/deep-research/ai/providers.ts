@@ -38,7 +38,7 @@ export const availableModels = Object.values(AI_MODEL_DISPLAY);
 // Create model instances with configurations
 export function createModel(modelId: AIModel, apiKey?: string) {
   // Use the API key from the environment if not provided
-  const openaiKey = apiKey || process.env.OPENAI_API_KEY || process.env.OPENAI_KEY;
+  const openaiKey = apiKey || process.env.OPENAI_API_KEY;
   
   if (!openaiKey) {
     console.warn('No OpenAI API key provided. Using default configuration.');
