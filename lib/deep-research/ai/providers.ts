@@ -10,18 +10,24 @@ export const AI_MODEL_DISPLAY = {
     name: 'GPT-4o',
     logo: '/providers/openai.webp',
     vision: true,
+    tokensPerMinute: 40000,
+    supportsStructuredOutput: true,
   },
-  'gpt-4o-mini': {
-    id: 'gpt-4o-mini',
-    name: 'GPT-4o mini',
-    logo: '/providers/openai.webp',
-    vision: true,
-  },
-  'o3-mini': {
-    id: 'o3-mini',
-    name: 'o3 mini',
+  'gpt-4': {
+    id: 'gpt-4',
+    name: 'GPT-4',
     logo: '/providers/openai.webp',
     vision: false,
+    tokensPerMinute: 10000,
+    supportsStructuredOutput: true,
+  },
+  'gpt-3.5-turbo': {
+    id: 'gpt-3.5-turbo',
+    name: 'GPT-3.5 Turbo',
+    logo: '/providers/openai.webp',
+    vision: false,
+    tokensPerMinute: 60000,
+    supportsStructuredOutput: false,
   },
 } as const;
 
@@ -29,21 +35,22 @@ export type AIModel = keyof typeof AI_MODEL_DISPLAY;
 export type AIModelDisplayInfo = (typeof AI_MODEL_DISPLAY)[AIModel];
 export const availableModels = Object.values(AI_MODEL_DISPLAY);
 
-// OpenAI Client
-const openai = createOpenAI({
-  apiKey: process.env.OPENAI_KEY!,
-});
-
 // Create model instances with configurations
 export function createModel(modelId: AIModel, apiKey?: string) {
   const client = createOpenAI({
     apiKey: apiKey || process.env.OPENAI_KEY!,
+    maxRetries: 3,
+    timeout: 60000,
   });
 
-  return client(modelId, {
-    structuredOutputs: true,
-    ...(modelId === 'o3-mini' ? { reasoningEffort: 'medium' } : {}),
-  });
+  // Only use structuredOutputs for models that support it
+  const modelInfo = AI_MODEL_DISPLAY[modelId];
+  const options = {
+    temperature: 0.2,
+    ...(modelInfo.supportsStructuredOutput ? { structuredOutputs: true } : {}),
+  };
+
+  return client(modelId, options);
 }
 
 // Token handling
@@ -81,4 +88,38 @@ export function trimPrompt(prompt: string, contextSize = 120_000) {
 
   // recursively trim until the prompt is within the context size
   return trimPrompt(trimmedPrompt, contextSize);
+}
+
+// Add a helper function to handle rate limits
+export async function withRateLimitRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries = 3,
+  initialDelay = 1000
+): Promise<T> {
+  let retries = 0;
+  
+  while (true) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      if (
+        error?.data?.error?.code === 'rate_limit_exceeded' &&
+        retries < maxRetries
+      ) {
+        // Extract wait time from error message if available
+        const waitTimeMatch = error?.data?.error?.message?.match(/try again in (\d+\.?\d*)s/i);
+        const waitTime = waitTimeMatch 
+          ? parseFloat(waitTimeMatch[1]) * 1000 
+          : initialDelay * Math.pow(2, retries);
+        
+        console.log(`Rate limit hit. Waiting ${waitTime/1000}s before retry ${retries + 1}/${maxRetries}`);
+        
+        // Wait for the specified time
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+        retries++;
+      } else {
+        throw error;
+      }
+    }
+  }
 }

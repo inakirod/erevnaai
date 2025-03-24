@@ -48,7 +48,7 @@ export function MultimodalInput({
   const [breadth, setBreadth] = useState(4);
   const [depth, setDepth] = useState(2);
   const [selectedModel, setSelectedModel] = useState<AIModelDisplayInfo>(
-    availableModels.find((model) => model.id === "o3-mini") ||
+    availableModels.find((model) => model.id === "gpt-4o") ||
       availableModels[0]
   );
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
@@ -125,6 +125,20 @@ export function MultimodalInput({
       <span className="text-xs font-medium">Download Report</span>
     </Button>
   );
+
+  // Add a tooltip/hint about rate limits
+  const [showRateLimitHint, setShowRateLimitHint] = useState(false);
+
+  // Update the model tooltip to include structured output support info
+  const modelTooltip = (model: AIModelDisplayInfo) => {
+    return (
+      <div className="text-xs text-muted-foreground">
+        {model.tokensPerMinute ? `Rate limit: ${model.tokensPerMinute / 1000}K TPM` : ''}
+        {model.id === 'gpt-3.5-turbo' && ' (Fastest)'}
+        {model.supportsStructuredOutput === false && ' (Limited features)'}
+      </div>
+    );
+  };
 
   return (
     <div className="relative w-full flex flex-col gap-4 border-none">
@@ -226,7 +240,7 @@ export function MultimodalInput({
                     }}
                     className={`
                       w-full px-3 py-2 text-left text-xs
-                      flex items-center gap-2
+                      flex flex-col items-start gap-1
                       ${
                         selectedModel.id === model.id
                           ? "bg-muted"
@@ -234,14 +248,17 @@ export function MultimodalInput({
                       }
                     `}
                   >
-                    <Image
-                      src={model.logo}
-                      alt={model.name}
-                      width={16}
-                      height={16}
-                      className="rounded-sm"
-                    />
-                    {model.name}
+                    <div className="flex items-center gap-2">
+                      <Image
+                        src={model.logo}
+                        alt={model.name}
+                        width={16}
+                        height={16}
+                        className="rounded-sm"
+                      />
+                      {model.name}
+                    </div>
+                    {modelTooltip(model)}
                   </button>
                 ))}
               </div>
@@ -345,7 +362,7 @@ export function MultimodalInput({
                     }}
                     className={`
                       w-full px-3 py-2 text-left text-xs
-                      flex items-center gap-2
+                      flex flex-col items-start gap-1
                       ${
                         selectedModel.id === model.id
                           ? "bg-muted"
@@ -353,14 +370,17 @@ export function MultimodalInput({
                       }
                     `}
                   >
-                    <Image
-                      src={model.logo}
-                      alt={model.name}
-                      width={16}
-                      height={16}
-                      className="rounded-sm"
-                    />
-                    {model.name}
+                    <div className="flex items-center gap-2">
+                      <Image
+                        src={model.logo}
+                        alt={model.name}
+                        width={16}
+                        height={16}
+                        className="rounded-sm"
+                      />
+                      {model.name}
+                    </div>
+                    {modelTooltip(model)}
                   </button>
                 ))}
               </div>
